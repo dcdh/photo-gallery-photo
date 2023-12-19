@@ -1,57 +1,46 @@
 package com.redhat.photogallery.photo;
 
-import java.util.List;
-
-import javax.inject.Inject;
-import javax.persistence.EntityManager;
-import javax.persistence.Query;
-import javax.transaction.Transactional;
-import javax.ws.rs.Consumes;
-import javax.ws.rs.GET;
-import javax.ws.rs.POST;
-import javax.ws.rs.Path;
-import javax.ws.rs.Produces;
-import javax.ws.rs.core.GenericEntity;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
-
+import com.redhat.photogallery.common.Constants;
+import com.redhat.photogallery.common.data.PhotoCreatedMessage;
+import io.vertx.core.json.JsonObject;
+import io.vertx.mutiny.core.eventbus.EventBus;
+import io.vertx.mutiny.core.eventbus.MessageProducer;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.TypedQuery;
+import jakarta.transaction.Transactional;
+import jakarta.ws.rs.*;
+import jakarta.ws.rs.core.GenericEntity;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.redhat.photogallery.common.Constants;
-import com.redhat.photogallery.common.data.PhotoCreatedMessage;
-
-import io.vertx.core.json.JsonObject;
-import io.vertx.reactivex.core.eventbus.EventBus;
-import io.vertx.reactivex.core.eventbus.MessageProducer;
+import java.util.List;
+import java.util.Objects;
 
 @Path("/photos")
 public class PhotoService {
-
     private static final Logger LOG = LoggerFactory.getLogger(PhotoService.class);
+    private final MessageProducer<JsonObject> topic;
+    private final EntityManager entityManager;
 
-    private MessageProducer<JsonObject> topic;
-
-    @Inject
-    EntityManager entityManager;
-
-    @Inject
-    public void injectEventBus(EventBus eventBus) {
-        topic = eventBus.<JsonObject>publisher(Constants.PHOTOS_TOPIC_NAME);
+    public PhotoService(final EntityManager entityManager, final EventBus eventBus) {
+        this.entityManager = Objects.requireNonNull(entityManager);
+        this.topic = eventBus.publisher(Constants.PHOTOS_TOPIC_NAME);
     }
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
-    @Produces(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.TEXT_PLAIN)
     @Transactional
-    public Long createPhoto(PhotoItem item) {
-
+    public Long createPhoto(final PhotoItem item) {
         item.persist();
         LOG.info("Added {} into the data store", item);
 
-        PhotoCreatedMessage message = createPhotoCreatedMessage(item);
-        topic.write(JsonObject.mapFrom(message));
-        LOG.info("Published {} on topic {}", message, topic.address());
+        final PhotoCreatedMessage message = new PhotoCreatedMessage(item.id, item.name, item.category);
+        topic.write(JsonObject.mapFrom(message))
+                .subscribe()
+                .with(onItemCallback -> LOG.info("Published {} on topic {}", message, topic.address()));
 
         return item.id;
     }
@@ -59,19 +48,11 @@ public class PhotoService {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     public Response readAllPhotos() {
-        Query query = entityManager.createQuery("FROM PhotoItem");
-        @SuppressWarnings("unchecked")
-        List<PhotoItem> items = query.getResultList();
+        final TypedQuery<PhotoItem> query = entityManager.createQuery("FROM PhotoItem", PhotoItem.class);
+        final List<PhotoItem> items = query.getResultList();
         LOG.info("Returned all {} items", items.size());
-        return Response.ok(new GenericEntity<List<PhotoItem>>(items){}).build();
-    }
-
-    private PhotoCreatedMessage createPhotoCreatedMessage(PhotoItem item) {
-        PhotoCreatedMessage msg = new PhotoCreatedMessage();
-        msg.setId(item.id);
-        msg.setName(item.name);
-        msg.setCategory(item.category);
-        return msg;
+        return Response.ok(new GenericEntity<>(items) {
+        }).build();
     }
 
 }

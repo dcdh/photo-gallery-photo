@@ -1,12 +1,14 @@
 package com.redhat.photogallery.photo;
 
-import javax.persistence.Entity;
-
-import io.quarkus.hibernate.orm.panache.PanacheEntity;
+import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
 
 @Entity
-public class PhotoItem extends PanacheEntity {
+public class PhotoItem extends PanacheEntityBase {
 
+    @Id
+    public Long id;
     public String name;
     public String category;
 
